@@ -1,0 +1,28 @@
+{
+  "location": "London, UK",
+  "niche": "real estate",
+  "results_found": 3,
+  "leads": [
+    {
+      "name": "Example Property Group",
+      "category": "Real Estate Agency",
+      "address": "London, UK",
+      "latitude": 51.5074,
+      "longitude": -0.1278
+    },
+    {
+      "name": "Example Estates",
+      "category": "Real Estate Agency",
+      "address": "London, UK",
+      "latitude": 51.5155,
+      "longitude": -0.0922
+    },
+    {
+      "name": "Example Homes",
+      "category": "Real Estate Agency",
+      "address": "London, UK",
+      "latitude": 51.5033,
+      "longitude": -0.1195
+    }
+  ]
+}
