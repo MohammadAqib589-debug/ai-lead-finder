@@ -1,0 +1,1420 @@
+{
+  "name": "AI Revenue OS - Combined (3 flows, 1 file)",
+  "nodes": [
+    {
+      "id": "92ab116e-7edf-4213-8b31-4653ad943d74",
+      "name": "Note: Combined AI Revenue OS",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -320,
+        -420
+      ],
+      "parameters": {
+        "content": "AI REVENUE OS -- 3 workflows, 1 file\n\nThis single file contains three independent flows, each with its own webhook trigger, stacked top-to-bottom:\n\n  Lane 1 (y ~ -420 to 200):   LEAD -> OUTREACH\n  Lane 2 (y ~ 780 to 1400):   LEAD -> APPOINTMENT\n  Lane 3 (y ~ 1980 to 2600):  APPOINTMENT -> REVENUE\n\nThey are NOT chained to each other inside this file -- each is triggered by its own webhook (lead-intake / inbound-message / trigger-proposal) exactly as when they were 3 separate files. Call workflow 3's webhook from wherever a lead becomes QUALIFIED/APPOINTMENT (e.g. from your CRM, or add an HTTP Request node at the end of Lane 2 pointing at Lane 3's webhook URL once imported). 38 functional nodes total, same as the 3-file version -- only the packaging changed.",
+        "height": 380,
+        "width": 640,
+        "color": 6
+      }
+    },
+    {
+      "id": "fff1ff56-448d-487f-8b09-5b9c828ad09e",
+      "name": "Note: LEAD -> OUTREACH\n\nWe",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        -80
+      ],
+      "parameters": {
+        "content": "LEAD -> OUTREACH\n\nWebhook -> Validate -> Research -> Groq Score -> Save -> Groq Outreach -> Human Approval (Wait node, resumes on webhook call) -> Gmail -> Update CRM.\n\nReliability: retryOnFail on both HTTP calls (transient errors), graceful score fallback on malformed AI JSON (application errors) -- no separate retry sub-flow needed for a single-purpose workflow this size.",
+        "height": 320,
+        "width": 420,
+        "color": 4
+      }
+    },
+    {
+      "id": "f8090651-2747-4cc3-a380-0c98a2badc94",
+      "name": "[1 LEAD->OUTREACH] Webhook - Lead Input",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-intake",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "76515e57-5f1b-4d0b-b276-68972af19761",
+      "name": "[1 LEAD->OUTREACH] Validate + Sanitize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const item = ($input.first().json.body) || $input.first().json;\nconst errors = [];\nconst emailRe = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\nfunction clean(v){ if(typeof v !== 'string') return v; return v.replace(/<[^>]*>/g,'').trim().slice(0,2000); }\nconst name = clean(item.name), email = clean(item.email||''), phone = clean(item.phone||'');\nif(!name) errors.push('missing_name');\nif(!email && !phone) errors.push('missing_contact');\nif(email && !emailRe.test(email)) errors.push('invalid_email');\nreturn [{ json: {\n  valid: errors.length === 0, errors,\n  lead_id: 'lead_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8),\n  name, email: email.toLowerCase(), phone, company: clean(item.company||''), website: clean(item.website||''),\n  message: clean(item.message||''), service: clean(item.service||''), budget: clean(item.budget||''),\n  source: clean(item.source||'unknown'), created_at: new Date().toISOString(), status: 'NEW', deal_stage: 'NEW'\n}}];"
+      }
+    },
+    {
+      "id": "9990d901-7b1c-4a45-88c3-f452f4b9bebd",
+      "name": "[1 LEAD->OUTREACH] IF - Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.valid}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "dc385d1c-5df4-42f9-8312-3bf4b4fdca34",
+      "name": "[1 LEAD->OUTREACH] Respond - Invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.2,
+      "position": [
+        720,
+        140
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'error', errors: $json.errors } }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "c6c2107a-5bbb-4c8d-ac71-5440c0daa942",
+      "name": "[1 LEAD->OUTREACH] Research Website",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        -140
+      ],
+      "parameters": {
+        "url": "={{$json.website}}",
+        "method": "GET",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "continueOnFail": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "cf121f85-18a3-45b6-bbe2-c372f7dbea9a",
+      "name": "[1 LEAD->OUTREACH] Clean Website Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        -140
+      ],
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst lead = $node[\"IF - Valid\"].json;\nconst html = (res.data || res.body || '').toString();\nconst text = html ? html.replace(/<script[\\s\\S]*?<\\/script>/gi,' ').replace(/<style[\\s\\S]*?<\\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/\\s+/g,' ').trim().slice(0,3000) : '';\nreturn [{ json: { ...lead, website_text: text } }];"
+      }
+    },
+    {
+      "id": "40a73828-92f1-437c-bc48-b9b5b6340ff0",
+      "name": "[1 LEAD->OUTREACH] Groq - Analyze + Score",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        -140
+      ],
+      "parameters": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'llama-3.3-70b-versatile',\n  messages: [ {role:'system', content: 'You are a lead qualification assistant. Never invent facts; use \\\"unknown\\\" if unsure. Return ONLY strict JSON: {\\\"lead_score\\\":0,\\\"qualification\\\":\\\"HOT|WARM|COLD|DISQUALIFIED\\\",\\\"pain_points\\\":[],\\\"sales_angle\\\":\\\"\\\",\\\"recommended_solution\\\":\\\"\\\"}' }, {role:'user', content: `Lead: ${$json.name} at ${$json.company}. Service: ${$json.service}. Message: \"${($json.message||'').slice(0,500)}\". Website: \"${($json.website_text||'').slice(0,1200)}\"` } ],\n  temperature: 0.3,\n  max_tokens: 500,\n  response_format: { type: 'json_object' }\n}) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "continueOnFail": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "9a61a5ce-e991-43a2-8645-0f05484d2309",
+      "name": "[1 LEAD->OUTREACH] Parse + Score (fallback safe)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        -140
+      ],
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst lead = $node[\"Clean Website Text\"].json;\nlet raw=''; try { raw = res.choices[0].message.content; } catch(e){ raw=''; }\nlet p=null;\nif(raw){ const c = raw.replace(/```json/gi,'').replace(/```/g,'').trim(); const m = c.match(/\\{[\\s\\S]*\\}/); try{ p = JSON.parse(m?m[0]:c);}catch(e){p=null;} }\nif(!p || typeof p.lead_score !== 'number'){ p = { lead_score: 0, qualification: 'COLD', pain_points: [], sales_angle: 'unknown', recommended_solution: 'unknown' }; }\nconst score = Math.max(0, Math.min(100, p.lead_score));\nreturn [{ json: { ...lead, lead_score: score, qualification: p.qualification || 'COLD', pain_points: p.pain_points||[],\n  sales_angle: p.sales_angle || 'unknown', recommended_solution: p.recommended_solution || 'unknown',\n  qualified: score >= 70, deal_stage: score >= 70 ? 'QUALIFIED' : 'NURTURE', status: score >= 70 ? 'QUALIFIED' : 'NURTURE',\n  dedupe_key: (lead.email || lead.phone || (lead.website+'|'+lead.company)).toLowerCase() } }];"
+      }
+    },
+    {
+      "id": "5bae6416-705f-4709-bcbf-464bad0a613e",
+      "name": "[1 LEAD->OUTREACH] Save Lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1680,
+        -140
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "PUT_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [
+            "dedupe_key"
+          ]
+        },
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "608caccb-4cab-4aef-ab13-f9aa5cc9e4d0",
+      "name": "[1 LEAD->OUTREACH] Groq - Generate Outreach",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        -140
+      ],
+      "parameters": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'llama-3.3-70b-versatile',\n  messages: [ {role:'system', content: 'Write a short, specific, non-generic sales email. Never claim a location, guarantee or price not given. Avoid cliches. Return ONLY strict JSON: {\\\"subject\\\":\\\"\\\",\\\"body\\\":\\\"\\\"}' }, {role:'user', content: `Recipient: ${$json.name} at ${$json.company}. Pain points: ${JSON.stringify($json.pain_points)}. Sales angle: ${$json.sales_angle}. Recommended: ${$json.recommended_solution}.` } ],\n  temperature: 0.3,\n  max_tokens: 500,\n  response_format: { type: 'json_object' }\n}) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "continueOnFail": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "6aedd00e-aa61-47a9-8bb9-15daed82d2dd",
+      "name": "[1 LEAD->OUTREACH] Parse Outreach",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        -140
+      ],
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst lead = $node[\"Save Lead\"].json;\nlet raw=''; try { raw = res.choices[0].message.content; } catch(e){ raw=''; }\nlet p=null;\nif(raw){ const c = raw.replace(/```json/gi,'').replace(/```/g,'').trim(); const m = c.match(/\\{[\\s\\S]*\\}/); try{ p = JSON.parse(m?m[0]:c);}catch(e){p=null;} }\nif(!p) p = { subject: 'Following up', body: 'Wanted to reach out about your business needs.' };\nreturn [{ json: { ...lead, outreach_subject: p.subject, outreach_body: p.body } }];"
+      }
+    },
+    {
+      "id": "783ba217-6b2f-44ee-a293-db3882d4f4fd",
+      "name": "[1 LEAD->OUTREACH] Human Approval",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2400,
+        -140
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "options": {}
+      }
+    },
+    {
+      "id": "cba22dc2-3735-489e-b5d3-8d8cd4e0ffb0",
+      "name": "[1 LEAD->OUTREACH] IF - Approved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2640,
+        -140
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.body.approved}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "8db12999-3665-4497-8b12-bfb95828313f",
+      "name": "[1 LEAD->OUTREACH] Gmail - Send Outreach",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2880,
+        -220
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{$node[\"Parse Outreach\"].json.email}}",
+        "subject": "={{$node[\"Parse Outreach\"].json.outreach_subject}}",
+        "message": "={{$node[\"Parse Outreach\"].json.outreach_body}}",
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "ed914b1d-1fee-4cab-b785-acdf6f13c584",
+      "name": "[1 LEAD->OUTREACH] Update CRM",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2880,
+        -40
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "PUT_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{$node[\"Parse Outreach\"].json.lead_id}}",
+            "status": "={{$json.body && $json.body.approved ? 'CONTACTED' : 'REJECTED'}}",
+            "deal_stage": "={{$json.body && $json.body.approved ? 'CONTACTED' : $node[\"Parse Outreach\"].json.deal_stage}}",
+            "last_contacted": "={{new Date().toISOString()}}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ]
+        },
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "4d995430-800c-43a6-a029-009dc4b13fb5",
+      "name": "Note: LEAD -> APPOINTMENT\n",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        1120
+      ],
+      "parameters": {
+        "content": "LEAD -> APPOINTMENT\n\nWebhook (inbound msg) -> Validate -> Find/Create Lead -> Groq Qualify+Decide (context pulled inline from the lead row) -> Update CRM -> AI Reply -> Interested? -> NO: schedule follow-up / YES: book calendar -> CRM update.",
+        "height": 300,
+        "width": 420,
+        "color": 4
+      }
+    },
+    {
+      "id": "79cf91f0-4abf-427f-83d2-4e2473a0824c",
+      "name": "[2 LEAD->APPOINTMENT] Webhook - Inbound Message",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        1200
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "inbound-message",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "d3b98157-f1f1-4876-8222-1cc68eb54ad1",
+      "name": "[2 LEAD->APPOINTMENT] Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        1200
+      ],
+      "parameters": {
+        "jsCode": "const item = $input.first().json.body || $input.first().json;\nreturn [{ json: {\n  lead_id: item.lead_id || '', message: (item.message||'').toString().slice(0,2000),\n  channel: item.channel || 'unknown', name: item.name || '', email: item.email || '', phone: item.phone || ''\n}}];"
+      }
+    },
+    {
+      "id": "3b316d69-e18d-4372-ac5a-5bde478beb2b",
+      "name": "[2 LEAD->APPOINTMENT] Find/Create Lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        480,
+        1200
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "PUT_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{$json.lead_id || 'lead_' + Date.now().toString(36)}}",
+            "name": "={{$json.name}}",
+            "email": "={{$json.email}}",
+            "phone": "={{$json.phone}}",
+            "last_interaction": "={{new Date().toISOString()}}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ]
+        },
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "bc583a51-3cce-43f1-a300-95c7fd398b14",
+      "name": "[2 LEAD->APPOINTMENT] Groq - Qualify + Decide",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        1200
+      ],
+      "parameters": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'llama-3.3-70b-versatile',\n  messages: [ {role:'system', content: 'You are an AI receptionist. Never fabricate policy, price or availability. Classify intent (FAQ,SALES,BOOKING,SUPPORT,COMPLAINT,HUMAN_REQUEST,OTHER). Return ONLY strict JSON: {\\\"intent\\\":\\\"\\\",\\\"reply\\\":\\\"\\\",\\\"lead_score\\\":0,\\\"qualification\\\":\\\"HOT|WARM|COLD\\\",\\\"appointment_requested\\\":false,\\\"escalate\\\":false}' }, {role:'user', content: `Known: name=${$json.name}, prior_score=${$json.lead_score||0}, prior_summary=${$json.conversation_summary||'none'}. New message (channel=${$node[\"Validate Input\"].json.channel}): \"${$node[\"Validate Input\"].json.message}\"` } ],\n  temperature: 0.3,\n  max_tokens: 500,\n  response_format: { type: 'json_object' }\n}) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "continueOnFail": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "8d66848b-fa55-40c0-bd0e-020e7650fd6b",
+      "name": "[2 LEAD->APPOINTMENT] Parse + Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        1200
+      ],
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst lead = $node[\"Find/Create Lead\"].json;\nlet raw=''; try { raw = res.choices[0].message.content; } catch(e){ raw=''; }\nlet p=null;\nif(raw){ const c = raw.replace(/```json/gi,'').replace(/```/g,'').trim(); const m = c.match(/\\{[\\s\\S]*\\}/); try{ p = JSON.parse(m?m[0]:c);}catch(e){p=null;} }\nif(!p){ p = { intent:'OTHER', reply:'Thanks for reaching out, a team member will follow up shortly.', lead_score:0, qualification:'COLD', appointment_requested:false, escalate:true }; }\nreturn [{ json: { ...lead, intent: p.intent, reply: p.reply, lead_score: p.lead_score||0, qualification: p.qualification||'COLD',\n  appointment_requested: !!p.appointment_requested, escalate: !!p.escalate,\n  conversation_summary: ((lead.conversation_summary||'') + ' | ' + $node[\"Validate Input\"].json.message + ' -> ' + p.reply).slice(-1500) } }];"
+      }
+    },
+    {
+      "id": "b087aa93-2037-4981-b3ce-b97b1ec0606a",
+      "name": "[2 LEAD->APPOINTMENT] Update CRM",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1200,
+        1200
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "PUT_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{$json.lead_id}}",
+            "lead_score": "={{$json.lead_score}}",
+            "qualification": "={{$json.qualification}}",
+            "status": "={{$json.qualification === 'HOT' || $json.qualification === 'WARM' ? 'ENGAGED' : 'NURTURE'}}",
+            "deal_stage": "={{$json.qualification === 'HOT' || $json.qualification === 'WARM' ? 'ENGAGED' : 'CONTACTED'}}",
+            "conversation_summary": "={{$json.conversation_summary}}",
+            "reply_received": true
+          },
+          "matchingColumns": [
+            "lead_id"
+          ]
+        },
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "af2f954f-a30d-498a-bd89-5339f4dca105",
+      "name": "[2 LEAD->APPOINTMENT] Respond - AI Reply",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.2,
+      "position": [
+        1200,
+        1340
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { reply: $json.reply, intent: $json.intent } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "9d6ea8f3-c7d0-4e8a-987d-86d22a06bceb",
+      "name": "[2 LEAD->APPOINTMENT] IF - Interested?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        1200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$node[\"Parse + Validate\"].json.appointment_requested}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "45d5c661-5a78-499a-b713-a67eb95eace2",
+      "name": "[2 LEAD->APPOINTMENT] Schedule Follow-up",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1680,
+        1280
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "PUT_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{$json.lead_id}}",
+            "next_follow_up": "={{new Date(Date.now()+2*86400000).toISOString().slice(0,10)}}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ]
+        },
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "c3868655-27ff-43de-a9a9-1cde3ac20683",
+      "name": "[2 LEAD->APPOINTMENT] Book Appointment",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        1680,
+        1120
+      ],
+      "parameters": {
+        "operation": "create",
+        "calendarId": {
+          "__rl": true,
+          "value": "primary",
+          "mode": "id"
+        },
+        "start": "={{new Date(Date.now()+86400000).toISOString()}}",
+        "end": "={{new Date(Date.now()+86400000+1800000).toISOString()}}",
+        "additionalFields": {
+          "summary": "=Consultation with {{$json.name}}"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "923b243a-ce7b-476a-bff1-9f4ef1e2607e",
+      "name": "[2 LEAD->APPOINTMENT] CRM - Update Appointment",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1920,
+        1120
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "PUT_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{$node[\"Parse + Validate\"].json.lead_id}}",
+            "status": "APPOINTMENT",
+            "deal_stage": "APPOINTMENT",
+            "appointment_date": "={{$json.start || ''}}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ]
+        },
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "b984a260-8f9e-4c82-b57e-3270f5b172b3",
+      "name": "Note: APPOINTMENT -> REVEN",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        2320
+      ],
+      "parameters": {
+        "content": "APPOINTMENT -> REVENUE\n\nWebhook (call this from workflow 2, or manually) -> Get Lead -> Groq Proposal draft -> Save (DRAFT) -> Human Approval (Wait) -> Gmail -> Wait for customer decision -> Accepted? -> YES: WON + revenue update / NO: LOST + follow-up.\n\nPrice is NEVER taken from the AI: it's either the known_price passed into the trigger, or the literal string \"Custom quote required\".",
+        "height": 340,
+        "width": 420,
+        "color": 4
+      }
+    },
+    {
+      "id": "bb091925-8424-4e1a-be6d-487ed503c762",
+      "name": "[3 APPOINTMENT->REVENUE] Webhook - Trigger Proposal",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        2400
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "trigger-proposal",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "639c369f-bd6c-49d0-aca3-15c71c56cb5b",
+      "name": "[3 APPOINTMENT->REVENUE] Get Lead + Requirements",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        2400
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "PUT_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "lead_id",
+              "lookupValue": "={{$json.body.lead_id}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "a774557f-69fb-4c1d-8f99-3e806af58b91",
+      "name": "[3 APPOINTMENT->REVENUE] Groq - Generate Proposal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        2400
+      ],
+      "parameters": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'llama-3.3-70b-versatile',\n  messages: [ {role:'system', content: 'Draft a proposal outline. Do not mention or invent any price -- pricing is handled outside this response. Return ONLY strict JSON: {\\\"scope\\\":\\\"\\\",\\\"timeline\\\":\\\"\\\",\\\"terms\\\":\\\"\\\",\\\"next_steps\\\":\\\"\\\"}' }, {role:'user', content: `Customer: ${$json.name} at ${$json.company}. Service: ${$json.service}. Requirements: ${$json.message}.` } ],\n  temperature: 0.3,\n  max_tokens: 500,\n  response_format: { type: 'json_object' }\n}) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "continueOnFail": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "8549fea2-b9fa-4e47-867c-cc645c7193da",
+      "name": "[3 APPOINTMENT->REVENUE] Parse Proposal (price never from AI)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        2400
+      ],
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst lead = $node[\"Get Lead + Requirements\"].json;\nconst trigger = $node[\"Webhook - Trigger Proposal\"].json.body || {};\nlet raw=''; try { raw = res.choices[0].message.content; } catch(e){ raw=''; }\nlet p=null;\nif(raw){ const c = raw.replace(/```json/gi,'').replace(/```/g,'').trim(); const m = c.match(/\\{[\\s\\S]*\\}/); try{ p = JSON.parse(m?m[0]:c);}catch(e){p=null;} }\nif(!p) p = { scope:'unknown', timeline:'unknown', terms:'unknown', next_steps:'Schedule a call to finalize scope.' };\nconst price = trigger.known_price || 'Custom quote required';\nreturn [{ json: {\n  proposal_id: 'prop_' + Date.now(), lead_id: lead.lead_id, customer: lead.name, company: lead.company,\n  scope: p.scope, timeline: p.timeline, terms: p.terms, next_steps: p.next_steps,\n  price, status: 'DRAFT', created_at: new Date().toISOString(), email: lead.email\n}}];"
+      }
+    },
+    {
+      "id": "db2aa4f5-162f-4cee-86af-101ff329fb91",
+      "name": "[3 APPOINTMENT->REVENUE] Save Proposal",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        960,
+        2400
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "PUT_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Proposals",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "5064860f-96e1-455d-b529-fb3a16ae1bbb",
+      "name": "[3 APPOINTMENT->REVENUE] Human Approval",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        2400
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "options": {}
+      }
+    },
+    {
+      "id": "efb18b53-bcc4-4e1d-a104-d3ce32952152",
+      "name": "[3 APPOINTMENT->REVENUE] IF - Approved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        2400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.body.approved}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "9dcf670d-953d-41dd-8208-a7b57153ab8a",
+      "name": "[3 APPOINTMENT->REVENUE] Gmail - Send Proposal",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1680,
+        2320
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{$node[\"Parse Proposal (price never from AI)\"].json.email}}",
+        "subject": "=Proposal for {{$node[\"Parse Proposal (price never from AI)\"].json.company}}",
+        "message": "=Scope: {{$node[\"Parse Proposal (price never from AI)\"].json.scope}}\\n\\nTimeline: {{$node[\"Parse Proposal (price never from AI)\"].json.timeline}}\\n\\nPricing: {{$node[\"Parse Proposal (price never from AI)\"].json.price}}\\n\\nNext steps: {{$node[\"Parse Proposal (price never from AI)\"].json.next_steps}}",
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "a28ab93e-5a3a-409e-8391-12a324d63e76",
+      "name": "[3 APPOINTMENT->REVENUE] Wait - Customer Decision",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1920,
+        2320
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "options": {}
+      }
+    },
+    {
+      "id": "5fb3be8a-9d58-403d-aa7b-c64210cf225d",
+      "name": "[3 APPOINTMENT->REVENUE] IF - Accepted",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2160,
+        2320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.body.accepted}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "27787aa1-9707-4c06-9e93-d18b1f690fad",
+      "name": "[3 APPOINTMENT->REVENUE] CRM - Mark WON + Revenue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2400,
+        2240
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "PUT_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{$node[\"Parse Proposal (price never from AI)\"].json.lead_id}}",
+            "status": "WON",
+            "deal_stage": "WON",
+            "probability": 100,
+            "deal_value": "={{$json.body.deal_value || 0}}",
+            "close_date": "={{new Date().toISOString().slice(0,10)}}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ]
+        },
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "02cd4c3c-8b1b-40ed-b0c1-931769b93336",
+      "name": "[3 APPOINTMENT->REVENUE] CRM - Mark Lost / Follow-up",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2400,
+        2400
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "PUT_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{$node[\"Parse Proposal (price never from AI)\"].json.lead_id}}",
+            "status": "LOST",
+            "deal_stage": "LOST",
+            "probability": 0,
+            "lost_reason": "={{$json.body.reason || 'unspecified'}}",
+            "close_date": "={{new Date().toISOString().slice(0,10)}}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ]
+        },
+        "options": {}
+      },
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "[1 LEAD->OUTREACH] Webhook - Lead Input": {
+      "main": [
+        [
+          {
+            "node": "[1 LEAD->OUTREACH] Validate + Sanitize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[1 LEAD->OUTREACH] Validate + Sanitize": {
+      "main": [
+        [
+          {
+            "node": "[1 LEAD->OUTREACH] IF - Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[1 LEAD->OUTREACH] IF - Valid": {
+      "main": [
+        [
+          {
+            "node": "[1 LEAD->OUTREACH] Research Website",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[1 LEAD->OUTREACH] Respond - Invalid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[1 LEAD->OUTREACH] Research Website": {
+      "main": [
+        [
+          {
+            "node": "[1 LEAD->OUTREACH] Clean Website Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[1 LEAD->OUTREACH] Clean Website Text": {
+      "main": [
+        [
+          {
+            "node": "[1 LEAD->OUTREACH] Groq - Analyze + Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[1 LEAD->OUTREACH] Groq - Analyze + Score": {
+      "main": [
+        [
+          {
+            "node": "[1 LEAD->OUTREACH] Parse + Score (fallback safe)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[1 LEAD->OUTREACH] Parse + Score (fallback safe)": {
+      "main": [
+        [
+          {
+            "node": "[1 LEAD->OUTREACH] Save Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[1 LEAD->OUTREACH] Save Lead": {
+      "main": [
+        [
+          {
+            "node": "[1 LEAD->OUTREACH] Groq - Generate Outreach",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[1 LEAD->OUTREACH] Groq - Generate Outreach": {
+      "main": [
+        [
+          {
+            "node": "[1 LEAD->OUTREACH] Parse Outreach",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[1 LEAD->OUTREACH] Parse Outreach": {
+      "main": [
+        [
+          {
+            "node": "[1 LEAD->OUTREACH] Human Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[1 LEAD->OUTREACH] Human Approval": {
+      "main": [
+        [
+          {
+            "node": "[1 LEAD->OUTREACH] IF - Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[1 LEAD->OUTREACH] IF - Approved": {
+      "main": [
+        [
+          {
+            "node": "[1 LEAD->OUTREACH] Gmail - Send Outreach",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[1 LEAD->OUTREACH] Update CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[1 LEAD->OUTREACH] Gmail - Send Outreach": {
+      "main": [
+        [
+          {
+            "node": "[1 LEAD->OUTREACH] Update CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[2 LEAD->APPOINTMENT] Webhook - Inbound Message": {
+      "main": [
+        [
+          {
+            "node": "[2 LEAD->APPOINTMENT] Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[2 LEAD->APPOINTMENT] Validate Input": {
+      "main": [
+        [
+          {
+            "node": "[2 LEAD->APPOINTMENT] Find/Create Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[2 LEAD->APPOINTMENT] Find/Create Lead": {
+      "main": [
+        [
+          {
+            "node": "[2 LEAD->APPOINTMENT] Groq - Qualify + Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[2 LEAD->APPOINTMENT] Groq - Qualify + Decide": {
+      "main": [
+        [
+          {
+            "node": "[2 LEAD->APPOINTMENT] Parse + Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[2 LEAD->APPOINTMENT] Parse + Validate": {
+      "main": [
+        [
+          {
+            "node": "[2 LEAD->APPOINTMENT] Update CRM",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "[2 LEAD->APPOINTMENT] Respond - AI Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[2 LEAD->APPOINTMENT] Update CRM": {
+      "main": [
+        [
+          {
+            "node": "[2 LEAD->APPOINTMENT] IF - Interested?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[2 LEAD->APPOINTMENT] IF - Interested?": {
+      "main": [
+        [
+          {
+            "node": "[2 LEAD->APPOINTMENT] Book Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[2 LEAD->APPOINTMENT] Schedule Follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[2 LEAD->APPOINTMENT] Book Appointment": {
+      "main": [
+        [
+          {
+            "node": "[2 LEAD->APPOINTMENT] CRM - Update Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[3 APPOINTMENT->REVENUE] Webhook - Trigger Proposal": {
+      "main": [
+        [
+          {
+            "node": "[3 APPOINTMENT->REVENUE] Get Lead + Requirements",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[3 APPOINTMENT->REVENUE] Get Lead + Requirements": {
+      "main": [
+        [
+          {
+            "node": "[3 APPOINTMENT->REVENUE] Groq - Generate Proposal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[3 APPOINTMENT->REVENUE] Groq - Generate Proposal": {
+      "main": [
+        [
+          {
+            "node": "[3 APPOINTMENT->REVENUE] Parse Proposal (price never from AI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[3 APPOINTMENT->REVENUE] Parse Proposal (price never from AI)": {
+      "main": [
+        [
+          {
+            "node": "[3 APPOINTMENT->REVENUE] Save Proposal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[3 APPOINTMENT->REVENUE] Save Proposal": {
+      "main": [
+        [
+          {
+            "node": "[3 APPOINTMENT->REVENUE] Human Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[3 APPOINTMENT->REVENUE] Human Approval": {
+      "main": [
+        [
+          {
+            "node": "[3 APPOINTMENT->REVENUE] IF - Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[3 APPOINTMENT->REVENUE] IF - Approved": {
+      "main": [
+        [
+          {
+            "node": "[3 APPOINTMENT->REVENUE] Gmail - Send Proposal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[3 APPOINTMENT->REVENUE] Gmail - Send Proposal": {
+      "main": [
+        [
+          {
+            "node": "[3 APPOINTMENT->REVENUE] Wait - Customer Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[3 APPOINTMENT->REVENUE] Wait - Customer Decision": {
+      "main": [
+        [
+          {
+            "node": "[3 APPOINTMENT->REVENUE] IF - Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[3 APPOINTMENT->REVENUE] IF - Accepted": {
+      "main": [
+        [
+          {
+            "node": "[3 APPOINTMENT->REVENUE] CRM - Mark WON + Revenue",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[3 APPOINTMENT->REVENUE] CRM - Mark Lost / Follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
